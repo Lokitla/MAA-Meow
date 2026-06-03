@@ -35,8 +35,8 @@ object LogcatServiceManager {
     private val _service = MutableStateFlow<ILogcatService?>(null)
 
     // --- Shizuku ---
-    private val serviceTag = UUID.randomUUID().toString()
-    private val serviceVersion = AtomicInteger(100)
+    // debug 下每次递增强制重建服务，release 下用 VERSION_CODE 同版本可复用
+    private val debugVersion = AtomicInteger(100)
     private var currentServiceArgs: Shizuku.UserServiceArgs? = null
 
     private val shizukuConnection = object : ServiceConnection {
@@ -114,8 +114,8 @@ object LogcatServiceManager {
         ).apply {
             processNameSuffix("logcat")
             daemon(false)
-            tag(serviceTag)
-            version(serviceVersion.incrementAndGet())
+            tag("logcat_service")
+            version(if (BuildConfig.DEBUG) debugVersion.incrementAndGet() else BuildConfig.VERSION_CODE)
             debuggable(BuildConfig.DEBUG)
         }
         currentServiceArgs = args
