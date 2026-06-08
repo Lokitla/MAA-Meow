@@ -15,6 +15,9 @@ import androidx.core.app.NotificationCompat
 import com.aliothmoon.maameow.MainActivity
 import com.aliothmoon.maameow.R
 import com.aliothmoon.maameow.manager.RemoteServiceManager
+import com.aliothmoon.maameow.data.preferences.AppSettingsManager
+
+import com.aliothmoon.maameow.domain.models.RunMode
 import com.aliothmoon.maameow.schedule.data.ScheduleStrategyRepository
 import com.aliothmoon.maameow.schedule.model.ExecutionResult
 import com.aliothmoon.maameow.schedule.model.ScheduleStrategy
@@ -25,10 +28,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
-import com.aliothmoon.maameow.schedule.service.ScheduleTriggerLogger
 
 class ScheduleExecutionService : Service() {
 
@@ -43,7 +46,10 @@ class ScheduleExecutionService : Service() {
     private val repository: ScheduleStrategyRepository by inject()
     private val alarmManager: ScheduleAlarmManager by inject()
     private val triggerLogger: ScheduleTriggerLogger by inject()
+    private val appSettingsManager: AppSettingsManager by inject()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val silentStarter: ForegroundScheduleStarter by inject()
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -102,7 +108,7 @@ class ScheduleExecutionService : Service() {
         )
 
         triggerLogger.append("检查锁屏状态...")
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val keyguardManager = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
         if (keyguardManager.isKeyguardLocked) {
             Timber.i("$TAG: 设备锁屏中，跳过本次定时执行: %s", strategy.name)
             triggerLogger.append("设备锁屏，跳过本次执行")
@@ -123,18 +129,29 @@ class ScheduleExecutionService : Service() {
         }
         triggerLogger.append("设备未锁屏，连接服务...")
 
-        val ctx = this
-        val launched = withTimeoutOrNull(10_000L) {
-            runCatching {
-                RemoteServiceManager.useRemoteService(timeoutMs = 8_000L) {
-                    it.startActivity(request.toLaunchIntent(ctx))
+        // 前台 + 允许前台定时：不拉起 Activity，通过 Starter 静默提交
+        val isForegroundSilent = appSettingsManager.runMode.value == RunMode.FOREGROUND
+                && appSettingsManager.allowForegroundScheduledTask.value
+
+        var launched = true
+
+        if (isForegroundSilent) {
+            triggerLogger.append("前台模式（已允许静默），直接提交定时请求")
+            silentStarter.executeSilentStart(request)
+        } else {
+            val ctx = this
+            launched = withTimeoutOrNull(10.seconds) {
+                runCatching {
+                    RemoteServiceManager.useRemoteService(timeoutMs = 8_000L) {
+                        it.startActivity(request.toLaunchIntent(ctx))
+                    }
+                }.getOrElse { error ->
+                    Timber.w(error, "$TAG: 拉起界面前连接服务失败")
+                    triggerLogger.append("连接服务失败: ${error.message}")
+                    false
                 }
-            }.getOrElse { error ->
-                Timber.w(error, "$TAG: 拉起界面前连接服务失败")
-                triggerLogger.append("连接服务失败: ${error.message}")
-                false
-            }
-        } ?: false
+            } ?: false
+        }
 
         if (!launched) {
             triggerLogger.append("未能拉起界面")
@@ -175,7 +192,7 @@ class ScheduleExecutionService : Service() {
     }
 
     private fun ensureNotificationChannel() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.notification_channel_schedule),
@@ -230,7 +247,7 @@ class ScheduleExecutionService : Service() {
             .setContentIntent(buildContentIntent())
             .setAutoCancel(true)
             .build()
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(RESULT_NOTIFICATION_ID, notification)
     }
 

@@ -259,6 +259,7 @@
     <string name="settings_deployment_with_pause_tip">部署干员前模拟按住 ESC 暂停游戏，提高部署精确度。如遇 ESC 注入异常或部分干员部署不到位，可关闭改用普通滑动</string>
     <string name="settings_force_fullscreen_on_virtual_display">强制 FULLSCREEN 模式</string>
     <string name="settings_exclude_from_recents_on_background">游戏不在后台中展示</string>
+    <string name="settings_allow_foreground_scheduled_task">允许在前台模式执行定时任务</string>
     <string name="settings_tasks_override_title">MAA 任务覆盖</string>
     <string name="settings_tasks_override_desc">如果你不知道这是什么请不要修改，会导致 MAA 无法正常工作</string>
     <string name="settings_tasks_override_edit_title">编辑配置 JSON</string>
@@ -1326,4 +1327,12 @@
     <string name="announcement_dont_show_again_hint">请阅读完公告并停留 %1$d 秒后可勾选</string>
     <string name="announcement_scroll_to_bottom_hint">请阅读完公告内容</string>
     <string name="announcement_confirm">确认</string>
+
+    <!-- i18n: overlay floatball -->
+    <string name="overlay_floatball_countdown_desc">正在倒计时，剩余 %1$s 秒</string>
+    <string name="overlay_floatball_state_idle">空闲</string>
+    <string name="overlay_floatball_state_starting">启动中</string>
+    <string name="overlay_floatball_state_running">运行中</string>
+    <string name="overlay_floatball_state_stopping">停止中</string>
+    <string name="overlay_floatball_state_error">错误</string>
 </resources>

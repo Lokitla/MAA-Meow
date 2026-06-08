@@ -33,6 +33,7 @@ import com.aliothmoon.maameow.constant.Routes
 import com.aliothmoon.maameow.data.preferences.AppSettingsManager
 import com.aliothmoon.maameow.domain.models.RunMode
 import com.aliothmoon.maameow.domain.service.ExternalNotificationService
+import com.aliothmoon.maameow.overlay.OverlayController
 import com.aliothmoon.maameow.presentation.components.AnnouncementDialog
 import com.aliothmoon.maameow.presentation.components.ResourceLoadingOverlay
 import com.aliothmoon.maameow.presentation.view.background.BackgroundTaskView
@@ -56,6 +57,7 @@ fun AppNavigation(
     backgroundTaskViewModel: BackgroundTaskViewModel,
     appSettings: AppSettingsManager = koinInject(),
     notificationService: ExternalNotificationService = koinInject(),
+    overlayController: OverlayController = koinInject(),
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -72,6 +74,7 @@ fun AppNavigation(
     val runMode by appSettings.runMode.collectAsStateWithLifecycle()
     val announcementReadVersion by appSettings.announcementReadVersion.collectAsStateWithLifecycle()
     val language by appSettings.language.collectAsStateWithLifecycle()
+    val overlayControlMode by appSettings.overlayControlMode.collectAsStateWithLifecycle()
     val pendingScheduledExecution by backgroundTaskViewModel.coordinator.pendingExecution.collectAsStateWithLifecycle()
     val scheduledCountdownState by backgroundTaskViewModel.coordinator.countdownState.collectAsStateWithLifecycle()
 
@@ -100,6 +103,18 @@ fun AppNavigation(
     LaunchedEffect(backgroundTaskViewModel) {
         backgroundTaskViewModel.coordinator.feedbackMessages.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(backgroundTaskViewModel) {
+        backgroundTaskViewModel.coordinator.countdownState.collect { state ->
+            overlayController.updateCountdownState(state)
+        }
+    }
+
+    LaunchedEffect(backgroundTaskViewModel) {
+        overlayController.onCountdownClick = {
+            backgroundTaskViewModel.onScheduledStartNow()
         }
     }
 
@@ -316,9 +331,10 @@ fun AppNavigation(
 
         ResourceLoadingOverlay()
 
-        // 全局定时任务倒计时弹窗
+        // 全局定时任务倒计时弹窗（前台所有控制模式均不弹出对话框，静默处理）
         val countdown = scheduledCountdownState
-        if (countdown is CountdownState.Counting) {
+        val hideCountdownDialog = runMode == RunMode.FOREGROUND
+        if (countdown is CountdownState.Counting && !hideCountdownDialog) {
             CountdownDialog(
                 state = countdown,
                 onCancel = { backgroundTaskViewModel.onScheduledCountdownCancel() },
