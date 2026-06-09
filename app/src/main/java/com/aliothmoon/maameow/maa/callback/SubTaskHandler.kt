@@ -632,24 +632,38 @@ class SubTaskHandler(
         val isExpiring = subDetails?.getBooleanValue("is_expiring") ?: false
         if (count > 0) medicineUsedTotal += count
 
-        when {
-            count == -1 -> append("${str("MedicineUsed")} Unknown times", LogLevel.ERROR)
-            isExpiring -> {
-                // 上游 dev-v2 925ff331a: 回调不带 expire_days, 反查当前 active fight config 计算小时数
-                val hours = computeExpireHoursFromActiveConfig()
-                val prefix = if (hours > 0) {
-                    str("ExpiringMedicineUsedHours", hours)
-                } else {
-                    str("ExpiringMedicineUsed")
-                }
-                append("$prefix (+$count, ${str("Total")}: $medicineUsedTotal)", LogLevel.INFO)
-            }
-
-            else -> append(
-                "${str("MedicineUsed")} (+$count, ${str("Total")}: $medicineUsedTotal)",
-                LogLevel.INFO
-            )
+        if (count == -1) {
+            append("${str("MedicineUsed")} Unknown times", LogLevel.ERROR)
+            return
         }
+
+        val baseLog = if (isExpiring) {
+            // 上游 dev-v2 925ff331a: 回调不带 expire_days, 反查当前 active fight config 计算小时数
+            val hours = computeExpireHoursFromActiveConfig()
+            val prefix = if (hours > 0) {
+                str("ExpiringMedicineUsedHours", hours)
+            } else {
+                str("ExpiringMedicineUsed")
+            }
+            "$prefix (+$count, ${str("Total")}: $medicineUsedTotal)"
+        } else {
+            "${str("MedicineUsed")} (+$count, ${str("Total")}: $medicineUsedTotal)"
+        }
+
+        // 上游 #17034: medicines 数组逐种打印 使用量/库存 (expire_days 上游亦未使用)
+        val medicines = subDetails?.getJSONArray("medicines")
+        val suffix = buildString {
+            if (medicines != null) {
+                for (i in 0 until medicines.size) {
+                    val m = medicines.getJSONObject(i) ?: continue
+                    append("\n").append(
+                        str("UseMedicine.MedicineInfo", m.getIntValue("use"), m.getIntValue("inventory"))
+                    )
+                }
+            }
+        }
+
+        append(baseLog + suffix, LogLevel.INFO)
     }
 
     /**
