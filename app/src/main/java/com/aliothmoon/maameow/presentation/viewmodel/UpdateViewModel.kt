@@ -59,6 +59,8 @@ class UpdateViewModel(
 
     val mirrorChyanCdk: StateFlow<String> = appSettingsManager.mirrorChyanCdk
 
+    val customMirrorUrl: StateFlow<String> = appSettingsManager.customMirrorUrl
+
     val updateChannel: StateFlow<UpdateChannel> = appSettingsManager.updateChannel
 
     private val _toastMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -121,6 +123,12 @@ class UpdateViewModel(
     fun setMirrorChyanCdk(cdk: String) {
         viewModelScope.launch {
             appSettingsManager.setMirrorChyanCdk(cdk)
+        }
+    }
+
+    fun setCustomMirrorUrl(url: String) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomMirrorUrl(url)
         }
     }
 
