@@ -92,6 +92,7 @@ fun UpdateCard(
     val appCheckResult by viewModel.appCheckResult.collectAsStateWithLifecycle()
     val updateSource by viewModel.updateSource.collectAsStateWithLifecycle()
     val mirrorChyanCdk by viewModel.mirrorChyanCdk.collectAsStateWithLifecycle()
+    val customMirrorUrl by viewModel.customMirrorUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
     
     val resourceUpToDateMessage = stringResource(R.string.update_toast_resource_up_to_date)
