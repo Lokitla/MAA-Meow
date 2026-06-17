@@ -1,0 +1,258 @@
+name: Sync Upstream & Release
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: '指定上游 tag（留空=最新）'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-sync:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.check.outputs.new_tag }}
+      should_build: ${{ steps.check.outputs.should_build }}
+      release_notes: ${{ steps.check.outputs.release_notes }}
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/Aliothmoon/MAA-Meow.git || true
+
+      - name: Fetch upstream
+        run: git fetch upstream --tags
+
+      - name: Check for new upstream release
+        id: check
+        run: |
+          # 获取输入的 tag 或上游最新 tag
+          INPUT_TAG="${{ github.event.inputs.upstream_tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            NEW_TAG="$INPUT_TAG"
+          else
+            NEW_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+            # 对比上游最新 tag
+            UPSTREAM_TAG=$(git tag -l 'v*' --sort=-v:refname --merged upstream/main | head -1)
+            if [ -z "$UPSTREAM_TAG" ]; then
+              UPSTREAM_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:short)' refs/tags/upstream-* | head -1 | sed 's/^upstream-//')
+            fi
+            NEW_TAG="$UPSTREAM_TAG"
+          fi
+
+          if [ -z "$NEW_TAG" ]; then
+            echo "No upstream tag found"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 检查是否已存在对应的 fork release
+          EXISTING=$(gh release view "$NEW_TAG" --json tagName 2>/dev/null && echo "yes" || echo "no")
+          if [ "$EXISTING" = "yes" ]; then
+            echo "Release $NEW_TAG already exists on fork"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "New upstream tag: $NEW_TAG"
+            echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
+
+            # 获取上游 release notes
+            NOTES=$(gh release view "$NEW_TAG" --repo Aliothmoon/MAA-Meow --json body -q '.body' 2>/dev/null || echo "")
+            echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+            echo "$NOTES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-code:
+    needs: check-and-sync
+    if: needs.check-and-sync.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/Aliothmoon/MAA-Meow.git || true
+          git fetch upstream --tags
+
+      - name: Sync upstream code (preserve mirror changes)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          TAG="${{ needs.check-and-sync.outputs.new_tag }}"
+
+          # 备份当前的自定义修改
+          MIRROR_FILES=(
+            "app/src/main/java/com/aliothmoon/maameow/constant/MaaApi.kt"
+            "app/src/main/java/com/aliothmoon/maameow/data/datasource/update/GitHubAppDownloadUrlResolver.kt"
+            "app/src/main/java/com/aliothmoon/maameow/data/datasource/update/GitHubResourceDownloadUrlResolver.kt"
+            "app/src/main/java/com/aliothmoon/maameow/data/datasource/update/MirrorLatencyTester.kt"
+            "app/src/main/java/com/aliothmoon/maameow/domain/models/AppSettings.kt"
+            "app/src/main/java/com/aliothmoon/maameow/data/preferences/AppSettingsManager.kt"
+            "app/src/main/java/com/aliothmoon/maameow/domain/service/update/UpdateService.kt"
+            "app/src/main/java/com/aliothmoon/maameow/presentation/viewmodel/UpdateViewModel.kt"
+            "app/src/main/java/com/aliothmoon/maameow/presentation/view/update/UpdateCard.kt"
+            "app/src/main/java/com/aliothmoon/maameow/presentation/view/settings/SettingsView.kt"
+            "app/src/main/res/values/strings.xml"
+            "app/src/main/res/values-en/strings.xml"
+            "app/src/main/java/com/aliothmoon/maameow/data/model/update/BuiltInMirrors.kt"
+          )
+
+          mkdir -p /tmp/mirror_backup
+          for f in "${MIRROR_FILES[@]}"; do
+            if [ -f "$f" ]; then
+              mkdir -p "/tmp/mirror_backup/$(dirname $f)"
+              cp "$f" "/tmp/mirror_backup/$f"
+            fi
+          done
+
+          # 切换到上游 tag
+          git checkout "$TAG"
+
+          # 恢复自定义修改
+          for f in "${MIRROR_FILES[@]}"; do
+            if [ -f "/tmp/mirror_backup/$f" ]; then
+              mkdir -p "$(dirname $f)"
+              cp "/tmp/mirror_backup/$f" "$f"
+            fi
+          done
+
+          # 如果有新建文件（如 MirrorLatencyTester.kt、BuiltInMirrors.kt），确保存在
+          for f in \
+            "app/src/main/java/com/aliothmoon/maameow/data/datasource/update/MirrorLatencyTester.kt" \
+            "app/src/main/java/com/aliothmoon/maameow/data/model/update/BuiltInMirrors.kt"; do
+            if [ -f "/tmp/mirror_backup/$f" ] && [ ! -f "$f" ]; then
+              mkdir -p "$(dirname $f)"
+              cp "/tmp/mirror_backup/$f" "$f"
+            fi
+          done
+
+          git add -A
+          git diff --cached --quiet || git commit -m "sync: merge upstream $TAG with mirror support"
+
+      - name: Push sync commit
+        run: |
+          TAG="${{ needs.check-and-sync.outputs.new_tag }}"
+          git tag "$TAG" -f
+          git push origin HEAD --force-with-lease
+          git push origin "$TAG" --force
+
+  build:
+    needs: [check-and-sync, sync-code]
+    if: needs.check-and-sync.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: sdkmanager --install "ndk;29.0.13113456" "cmake;3.22.1"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Download MAA Core
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/setup_maa_core.py --clean --abi arm64-v8a
+
+      - name: Override ABI filter
+        run: |
+          cat >> app/build.gradle.kts << 'EOF'
+
+          android.defaultConfig.ndk.abiFilters.clear()
+          android.defaultConfig.ndk.abiFilters += "arm64-v8a"
+          EOF
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > ${{ github.workspace }}/release.jks
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean assembleRelease
+
+      - name: Rename APK
+        run: |
+          cd app/build/outputs/apk/release
+          TAG="${{ needs.check-and-sync.outputs.new_tag }}"
+          for f in *.apk; do
+            mv "$f" "MaaMeow-${TAG}-arm64-v8a.apk"
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk-arm64-v8a
+          path: app/build/outputs/apk/release/*.apk
+
+  release:
+    needs: [check-and-sync, build]
+    if: needs.check-and-sync.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-apk-*
+          merge-multiple: true
+          path: apks
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-and-sync.outputs.new_tag }}
+          name: "MaaMeow ${{ needs.check-and-sync.outputs.new_tag }}"
+          draft: false
+          prerelease: false
+          files: apks/*.apk
+          body: |
+            ${{ needs.check-and-sync.outputs.release_notes }}
+
+            ---
+            > 本版本由自动同步构建，包含自定义镜像加速功能。
+            > 内置镜像: ghfast.top / gh-proxy.com / ghproxy.cc / github.moeyy.xyz
