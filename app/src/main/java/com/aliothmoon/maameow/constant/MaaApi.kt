@@ -22,7 +22,8 @@ object MaaApi {
 
     val API_URLS = listOf(
         MAA_API,
-        MAA_API_BACKUP
+        MAA_API_BACKUP,
+        "https://maa-api.oss-cn-beijing.aliyuncs.com/MaaAssistantArknights/api/"
     )
 
 
@@ -36,10 +37,22 @@ object MaaApi {
     const val GITHUB_RESOURCE =
         "https://github.com/MaaAssistantArknights/MaaResource/archive/refs/heads/main.zip"
 
+    // GitHub 镜像加速
+    const val GITHUB_RESOURCE_MIRROR1 =
+        "https://mirror.ghproxy.com/https://github.com/MaaAssistantArknights/MaaResource/archive/refs/heads/main.zip"
+    const val GITHUB_RESOURCE_MIRROR2 =
+        "https://ghfast.top/https://github.com/MaaAssistantArknights/MaaResource/archive/refs/heads/main.zip"
+
+    val GITHUB_RESOURCE_URLS = listOf(
+        GITHUB_RESOURCE,
+        GITHUB_RESOURCE_MIRROR1,
+        GITHUB_RESOURCE_MIRROR2
+    )
+
     // ==================== App 更新 ====================
 
     // GitHub 仓库
-    const val APP_GITHUB_OWNER = "Aliothmoon"
+    const val APP_GITHUB_OWNER = "Lokitla"
     const val APP_GITHUB_REPO = "MAA-Meow"
 
     // GitHub Release API (包含 prerelease)
@@ -51,6 +64,10 @@ object MaaApi {
 
     fun appGitHubReleaseByTag(tag: String): String =
         "https://api.github.com/repos/$APP_GITHUB_OWNER/$APP_GITHUB_REPO/releases/tags/$tag"
+
+    // GitHub API 镜像（国内加速）
+    const val APP_GITHUB_RELEASES_MIRROR =
+        "https://mirror.ghproxy.com/https://api.github.com/repos/$APP_GITHUB_OWNER/$APP_GITHUB_REPO/releases?per_page=1"
 
     // MirrorChyan App 更新源
     const val MIRROR_CHYAN_APP_RESOURCE = "https://mirrorchyan.com/api/resources/MAA-Meow/latest"
