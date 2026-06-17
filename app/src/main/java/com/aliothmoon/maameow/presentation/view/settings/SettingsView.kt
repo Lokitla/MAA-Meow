@@ -21,13 +21,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +48,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,6 +59,8 @@ import com.aliothmoon.maameow.R
 import com.aliothmoon.maameow.constant.DefaultDisplayConfig
 import com.aliothmoon.maameow.constant.Routes
 import com.aliothmoon.maameow.data.model.update.UpdateChannel
+import com.aliothmoon.maameow.data.model.update.BuiltInMirrors
+import com.aliothmoon.maameow.data.datasource.update.MirrorLatencyTester
 import com.aliothmoon.maameow.data.preferences.AppSettingsManager
 import com.aliothmoon.maameow.domain.models.RemoteBackend
 import com.aliothmoon.maameow.domain.service.LogExportService
@@ -91,6 +99,7 @@ fun SettingsView(
     val allowForegroundScheduledTask by viewModel.allowForegroundScheduledTask.collectAsStateWithLifecycle()
     val tasksOverrideEnabled by viewModel.tasksOverrideEnabled.collectAsStateWithLifecycle()
     val updateChannel by viewModel.updateChannel.collectAsStateWithLifecycle()
+    val customMirrorUrl by viewModel.customMirrorUrl.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val backgroundResolution by viewModel.backgroundResolution.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
@@ -227,6 +236,12 @@ fun SettingsView(
                         contentColor = contentColor,
                         selectedChannel = updateChannel,
                         onChannelSelected = { viewModel.setUpdateChannel(it) }
+                    )
+                    SettingsDivider(contentColor)
+                    SettingMirrorItem(
+                        contentColor = contentColor,
+                        currentMirrorUrl = customMirrorUrl,
+                        onMirrorUrlChange = { viewModel.setCustomMirrorUrl(it) }
                     )
                 }
             }
@@ -457,7 +472,7 @@ fun SettingsView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                Misc.openUriSafely(context, "https://github.com/Aliothmoon/MAA-Meow")
+                                Misc.openUriSafely(context, "https://github.com/Lokitla/MAA-Meow")
                             }
                             .padding(vertical = MaaDesignTokens.Spacing.listItemVertical),
                         textAlign = TextAlign.Center
@@ -700,6 +715,169 @@ private fun SettingChannelItem(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingMirrorItem(
+    contentColor: Color,
+    currentMirrorUrl: String,
+    onMirrorUrlChange: (String) -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var selectedMirror by remember { mutableStateOf("") }
+    var customUrl by remember { mutableStateOf(currentMirrorUrl) }
+    var latencyResults by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+    var isTesting by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // 初始化选中的镜像
+    LaunchedEffect(currentMirrorUrl) {
+        val builtIn = BuiltInMirrors.mirrors.find { it.url == currentMirrorUrl }
+        if (builtIn != null) {
+            selectedMirror = builtIn.name
+            customUrl = ""
+        } else if (currentMirrorUrl.isNotBlank()) {
+            selectedMirror = "自定义..."
+            customUrl = currentMirrorUrl
+        } else {
+            selectedMirror = "GitHub 直连"
+            customUrl = ""
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(stringResource(R.string.settings_mirror_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_mirror_desc),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    // 测试所有镜像按钮
+                    TextButton(
+                        onClick = {
+                            isTesting = true
+                            latencyResults = emptyMap()
+                            coroutineScope.launch {
+                                val testUrl = "https://github.com/Lokitla/MAA-Meow/releases/latest"
+                                val results = mutableMapOf<String, Double>()
+                                BuiltInMirrors.mirrors.filter { it.isBuiltIn && it.url.isNotBlank() }.forEach { mirror ->
+                                    val mirrorUrl = "${mirror.url.trimEnd('/')}/$testUrl"
+                                    val latency = MirrorLatencyTester.testLatency(mirrorUrl)
+                                    results[mirror.name] = latency
+                                }
+                                latencyResults = results
+                                isTesting = false
+                            }
+                        },
+                        enabled = !isTesting
+                    ) {
+                        Text(if (isTesting) stringResource(R.string.settings_mirror_testing)
+                             else stringResource(R.string.settings_mirror_test_all))
+                    }
+
+                    // 内置镜像列表
+                    BuiltInMirrors.mirrors.forEach { mirror ->
+                        val latency = latencyResults[mirror.name]
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .selectable(
+                                    selected = selectedMirror == mirror.name,
+                                    onClick = {
+                                        selectedMirror = mirror.name
+                                        if (mirror.isBuiltIn) {
+                                            onMirrorUrlChange(mirror.url)
+                                        }
+                                    },
+                                    role = Role.RadioButton
+                                )
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedMirror == mirror.name,
+                                onClick = null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = mirror.name,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                if (latency != null) {
+                                    Text(
+                                        text = if (latency >= 0) "${latency.toLong()}ms" else stringResource(R.string.settings_mirror_unreachable),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (latency >= 0) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 自定义 URL 输入框
+                    AnimatedVisibility(visible = selectedMirror == "自定义...") {
+                        OutlinedTextField(
+                            value = customUrl,
+                            onValueChange = {
+                                customUrl = it
+                                onMirrorUrlChange(it)
+                            },
+                            label = { Text(stringResource(R.string.settings_mirror_custom_label)) },
+                            placeholder = { Text(stringResource(R.string.settings_mirror_custom_placeholder)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (selectedMirror == "自定义...") {
+                        onMirrorUrlChange(customUrl)
+                    }
+                    showDialog = false
+                }) {
+                    Text(stringResource(R.string.common_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            }
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = MaaDesignTokens.Spacing.listItemVertical)
+            .clickable { showDialog = true },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = stringResource(R.string.settings_mirror_title),
+                style = MaterialTheme.typography.bodyLarge,
+                color = contentColor
+            )
+            Text(
+                text = if (currentMirrorUrl.isBlank()) stringResource(R.string.settings_mirror_desc_default)
+                else currentMirrorUrl,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor.copy(alpha = 0.7f)
+            )
         }
     }
 }
