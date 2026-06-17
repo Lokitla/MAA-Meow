@@ -48,12 +48,17 @@ class UpdateService(
     private val resourceDownloader: ResourceDownloader,
     private val extractor: ZipExtractor,
 ) {
+    private fun getGitHubMirrorUrl(): String? {
+        val url = appSettingsManager.customMirrorUrl.value
+        return url.takeIf { it.isNotBlank() }
+    }
+
     private val appDownloadResolvers: Map<UpdateSource, AppDownloadUrlResolver> = mapOf(
         UpdateSource.MIRROR_CHYAN to MirrorChyanAppDownloadUrlResolver(
             apiClient,
             appSettingsManager
         ),
-        UpdateSource.GITHUB to GitHubAppDownloadUrlResolver(httpClient)
+        UpdateSource.GITHUB to GitHubAppDownloadUrlResolver(httpClient, getGitHubMirrorUrl())
     )
 
     private val resourceDownloadResolvers: Map<UpdateSource, ResourceDownloadUrlResolver> = mapOf(
@@ -61,7 +66,7 @@ class UpdateService(
             apiClient,
             appSettingsManager
         ),
-        UpdateSource.GITHUB to GitHubResourceDownloadUrlResolver()
+        UpdateSource.GITHUB to GitHubResourceDownloadUrlResolver(getGitHubMirrorUrl())
     )
 
     // ==================== App 更新 ====================
