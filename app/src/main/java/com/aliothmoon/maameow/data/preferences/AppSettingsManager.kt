@@ -121,6 +121,18 @@ class AppSettingsManager(private val context: Context) {
         }
     }
 
+    // 自定义镜像 URL 前缀
+    val customMirrorUrl: StateFlow<String> = settings
+        .map { it.customMirrorUrl }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, initialSettings.customMirrorUrl)
+
+    suspend fun setCustomMirrorUrl(url: String) {
+        with(AppSettingsSchema) {
+            context.dataStore.edit { it[customMirrorUrl] = url.trimEnd('/') + "/" }
+        }
+    }
+
     // 调试模式
     val debugMode: StateFlow<Boolean> = settings
         .map { it.debugMode.toBooleanStrictOrNull() ?: false }
